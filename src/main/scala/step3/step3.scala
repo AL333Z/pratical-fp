@@ -83,7 +83,11 @@ case class ApiClient[T[_], E](invoker: ApiInvoker[T, E])(
         val xmlInput: Elem = toXml.toXml(input)
         val apiOutput: T[Elem] = invoker.invoke(xmlInput, name)
         M.flatMap { (x: Elem) =>
-          fromXml.fromXml(x).fold(M.raiseError[O], M.pure[O])
+          val fromXmlEither: Either[E, O] = fromXml.fromXml(x)
+          fromXmlEither.fold(
+            error => M.raiseError[O](error),
+            actualOutput => M.pure[O](actualOutput)
+          )
         }(apiOutput)
       }
     }

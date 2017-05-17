@@ -3,13 +3,13 @@ Practical Functional Programming, from first principles
 
 ---
 
-Why
+Motivation
 ===
 
 Because we don't like
-- mutability, variables
-- runtime exceptions
+- mutable state, variables
 - hidden side-effects
+- runtime exceptions
 - weakly typed languages
 
 ---
@@ -18,7 +18,6 @@ A use case
 ===
 
 Let's say we want to model an **api client**.
-
 
 Requirements:
 - The client should be **flexible** and **generic**:
@@ -145,13 +144,20 @@ The pattern is simple:
 
 ---
 Step 1, pt. 3 - FromXml, ToXml instances
+===
 
 ```scala
+  // 0
   case class GetOrderListInput(userId: String)
 
   case class Order(orderNo: String, userId: String)
   case class GetOrderListOutput(orderList: List[Order])
 
+  // 1
+  trait ToXml[I] { def toXml(input: I): Elem }
+  trait FromXml[O, E] { def fromXml(elem: Elem): Either[E, O] }
+
+  // 2
   implicit val getOrderListInputToXml = 
     new ToXml[GetOrderListInput] {
       def toXml(input: GetOrderListInput): Elem = 
@@ -169,10 +175,14 @@ Step 1, pt. 3 - FromXml, ToXml instances
 Step 1 - Outline
 ===
 
+What we defined:
+- An abstraction to model apis
+- Adt, typeclasses and instances to serialize/deserialize arbitrary input to/from xml
+
 Concepts:
 - Higher-kinds: `T[_]`
-- Ad-hoc polymorphism and typeclass 101
 - Immutable modelling with ADT
+- Ad-hoc polymorphism and typeclass
 - Explicit error types: `Either`
 
 ---
@@ -180,7 +190,7 @@ Concepts:
 Step 2 - Structures pt.1
 ===
 
-Now that we defined some basic ADT and typeclass, let's move forward toward compositionability.. and get some job done.
+Now that we defined some basic ADTs and typeclasses, let's move forward toward **compositionability**..
 
 Let's start redefining some basic typeclass (as an exercise..)
 
@@ -219,6 +229,13 @@ Step 2 - Structures pt.3
 ===
 
 Let's define an `MonadError` instance for `Try`.
+
+```scala
+trait Try[+A]
+sealed case class Success[A](value: A) extends Try[A]
+sealed case class Failure[A](err: Throwable) extends Try[Nothing]
+```
+
 Since a `MonadError` is a `Monad`, and a `Monad` is an `Applicative`, and an `Applicative` is a `Functor`..
 
 ```scala
@@ -236,7 +253,6 @@ Since a `MonadError` is a `Monad`, and a `Monad` is an `Applicative`, and an `Ap
       }
   }
 ```
-There're also other way to organize instances code. This is concise enought to fit a slide.
 
 ---
 
@@ -245,10 +261,10 @@ Step 2 - Outline
 
 Concepts:
 - FP basic structures: Functor, Applicative, Monad
-- Deriving an instance for an existing ADT: Try as a MonadError
+- Deriving an instance for an existing ADT: `Try` as a `MonadError`
 
 NB:
-- Redefining structures and instances is a great exercise. But usually you'll just import some lib (scalaz, catz, etc..)
+- Redefining structures and instances is a great exercise. But usually you'll just import a lib (scalaz, catz, etc..)
 - In this session I'm not talking about laws which each structure need to respect
 
 ---
@@ -275,13 +291,13 @@ Step 3 - ApiClient
 ```scala
 class ApiClient[T[_], E](implicit M: MonadError[T, E]) {
 
-  def getOrderList[I, O](implicit
-                                   toXml: ToXml[I],
-                                   fromXml: FromXml[O, E]) =
-    new Api[T, I, O] {
-      override def name: String = "getOrderList"
-      override def run(input: I): T[O] = ???
-    }
+  def getOrderList[I, O](implicit 
+    toXml: ToXml[I], 
+    fromXml: FromXml[O, E]): Api[T, I, O] = 
+      new Api[T, I, O] {
+        override def name: String = "getOrderList"
+        override def run(input: I): T[O] = ???
+      }
 }
 ```
 Getting closer, but we're still missing the actual "api invocation" part.
@@ -309,7 +325,7 @@ case class ApiClient[T[_], E](invoker: ApiInvoker[T, E])(
 ```
 
 ---
-Step 3 - Composing abstractions aka the fun part
+Step 3 - Composing abstractions
 ===
 
 ```scala
@@ -326,7 +342,11 @@ case class ApiClient[T[_], E](invoker: ApiInvoker[T, E])(
         val xmlInput: Elem = toXml.toXml(input)
         val apiOutput: T[Elem] = invoker.invoke(xmlInput, name)
         M.flatMap { (x: Elem) =>
-          fromXml.fromXml(x).fold(M.raiseError[O], M.pure[O])
+          val fromXmlEither: Either[E, O] = fromXml.fromXml(x)
+          fromXmlEither.fold(
+            error => M.raiseError[O](error),
+            actualOutput => M.pure[O](actualOutput)
+          )
         }(apiOutput)
       }
     }
@@ -400,7 +420,7 @@ Step 4 - An async api client
 
 As simple as:
 1. Choose the right async context. In this session: plain scala's `Future`.
-1. Provide an instance for `MonadError[Future, E]
+1. Provide an instance for `MonadError[Future, Throwable]
 1. Define an invoker wich will handle api call returning `Future`s.
 
 ---
@@ -470,9 +490,3 @@ Step 4 - Outline
 
 - Ad-hoc polymorphism in action
 - Different types, different effects, same architecture.
-
----
-
-Step 5 - Typed erros
-===
-
