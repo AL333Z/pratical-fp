@@ -1,6 +1,9 @@
 Practical Functional Programming, from first principles
 ===
 
+@al333z
+---
+
 ---
 
 Motivation
@@ -60,8 +63,10 @@ Just joking.
 Type Driven Development
 ===
 
-Start with a bunch of adts and structures, introduce some more, refactor.
-Testing is still important, but the design is driven by types.
+- Start with a bunch of *ADT*s modelling core entities and *structures*, introduce some more, refactor
+- Testing is still important to spot *smells*, but the design is driven by types
+- You'll find yourself NOT writing a huge number of tests, because type and structures are *lawful* and you can compose them safely
+- Tests are usually the first end-users of your api
 
 ---
 
@@ -76,16 +81,47 @@ trait Api[T[_], I, O] {
 ```
 
 `T` is a **higher-kinded** type. 
-It's like data constructor, but for types.
+It's like a data constructor, but for types.
 
-`T[_]` means that the type `T` has a "hole", so it'll need to receive another type to be concrete.
-
-In this intial formulation, everything is generic.
-The input `I`, the output `O` and also the container (or context) `T`.
+`T[_]` means that the type `T` has a "hole", so it'll need to receive another type to be a **proper type**.
 
 ---
 
-Step 1, pt. 2 - FromXml, ToXml
+Foundations - Higher kinds
+===
+
+![](https://i.stack.imgur.com/K0dwL.jpg)
+
+---
+Foundations - Higher kinds
+===
+
+Examples: 
+- `Try[A]` has kind 1, or * -> *, or first order
+- `Try[Int]` has kind 0, or *
+- `Either[L, R]` has kind 2, or * -> * -> *, or first order
+- `Either[Throwable, R]` has kind 1, or * -> *
+- `Functor[F[_]]` has kind (* -> *) -> *, or higher kind
+
+---
+
+Foundations
+===
+```scala
+trait Api[T[_], I, O] {
+  def name: String
+  def run(input: I): T[O]
+}
+```
+
+In this intial formulation, everything is **generic**.
+The input `I`, the output `O` and also the container (or context) `T`.
+
+`I` and `O` have kind 0, so they just need to be concrete types (e.g. ADTs)
+
+---
+
+Step 1 - FromXml, ToXml
 ===
 ```scala
 trait ToXml[I] {
@@ -111,30 +147,7 @@ Ad-hoc polymorphism
 ===
 
 A way to add behaviors without altering ADT structure.
-Implemented throught **typeclasses**.
-
-- ADT
-```scala
-case class GetOrderListInput(userId: String)
-```
-- Typeclass
-```scala 
-trait ToXml[I] {
-  def toXml(input: I): Elem
-}
-```
- - Typeclass instance for the ADT
-```scala 
-implicit val getOrderListInputToXml = 
-  new ToXml[GetOrderListInput] {
-    def toXml(input: GetOrderListInput): Elem = 
-      <Order UserId={input.userId}/>
-  }
-```
----
-
-Ad-hoc polymorphism pt. 2
-===
+Implemented through **typeclasses**.
 
 The pattern is simple:
 0. define the ADT
@@ -143,6 +156,7 @@ The pattern is simple:
 3. import the instance in scope, and start profit.
 
 ---
+
 Step 1, pt. 3 - FromXml, ToXml instances
 ===
 
@@ -176,8 +190,8 @@ Step 1 - Outline
 ===
 
 What we defined:
-- An abstraction to model apis
-- Adt, typeclasses and instances to serialize/deserialize arbitrary input to/from xml
+- An abstraction to model apis (`Api[T, I, O]`)
+- Adt, typeclasses and instances to serialize/deserialize arbitrary input to/from xml (`GetOrderListInput`, `GetOrderListOutput`, `ToXml[I]`, `FromXml[E, O]`)
 
 Concepts:
 - Higher-kinds: `T[_]`
@@ -187,7 +201,7 @@ Concepts:
 
 ---
 
-Step 2 - Structures pt.1
+Step 2 - Structures
 ===
 
 Now that we defined some basic ADTs and typeclasses, let's move forward toward **compositionability**..
@@ -208,7 +222,7 @@ trait Applicative[F[_]] extends Functor[F] {
 ```
 
 ---
-Step 2 - Structures pt.2
+Step 2 - Structures
 ===
 - **Monad**, an Applicative with also operations that don't preserve the structure.
 ```scala
@@ -225,7 +239,7 @@ trait MonadError[M[_], E] extends Monad[M] {
 }
 ```
 ---
-Step 2 - Structures pt.3
+Step 2 - Structures
 ===
 
 Let's define an `MonadError` instance for `Try`.
@@ -236,22 +250,22 @@ sealed case class Success[A](value: A) extends Try[A]
 sealed case class Failure[A](err: Throwable) extends Try[Nothing]
 ```
 
-Since a `MonadError` is a `Monad`, and a `Monad` is an `Applicative`, and an `Applicative` is a `Functor`..
+Since a `MonadError` is a `Monad`, and a `Monad` is an `Applicative`..
 
 ```scala
-  implicit val tryMonadError = new MonadError[Try, Throwable] {
-    def map[A, B](f: (A) => B)(fa: Try[A]): Try[B] = fa match {
-      case Success(a) => Success(f(a))
-      case Failure(t) => Failure(t)
-    }
-    def pure[A](a: A): Try[A] = Success(a)
-    def raiseError[A](e: Throwable): Try[A] = Failure(e)
-    def flatMap[A, B](f: (A) => Try[B])(ma: Try[A]): Try[B] = 
-      ma match {
-        case Success(a) => f(a)
-        case Failure(t) => Failure(t)
-      }
+implicit val tryMonadError = new MonadError[Try, Throwable] {
+  def pure[A](a: A): Try[A] = Success(a)
+  def map[A, B](f: (A) => B)(fa: Try[A]): Try[B] = fa match {
+    case Success(a) => Success(f(a))
+    case Failure(t) => Failure(t)
   }
+  def flatMap[A, B](f: (A) => Try[B])(ma: Try[A]): Try[B] = 
+    ma match {
+      case Success(a) => f(a)
+      case Failure(t) => Failure(t)
+  }
+  def raiseError[A](e: Throwable): Try[A] = Failure(e)
+}
 ```
 
 ---
@@ -382,14 +396,13 @@ Step 3 - Actual end-user code, finally
 
 ```scala
 object Demo extends App {
+  // import ADTs
+  import step3.GetOrderListInput
+  import step3.GetOrderListOutput
 
   // import typeclass instances
   import step3.{getOrderListInputToXml, getOrderListOutputFromXml}
   import step3.tryMonadError
-
-  // import models
-  import step3.GetOrderListInput
-  import step3.GetOrderListOutput
 
   val invoker = BlockingApiInvoker("foo")
   val apiClient = ApiClient[Try, Throwable](invoker)
@@ -466,14 +479,13 @@ Step 4 - Demo
 
 ```scala
 object Demo extends App {
+  // import models
+  import step4.GetOrderListInput
+  import step4.GetOrderListOutput
 
   // import typeclass instances
   import step4.{getOrderListInputToXml, getOrderListOutputFromXml}
   import step4.futureMonadError
-
-  // import models
-  import step4.GetOrderListInput
-  import step4.GetOrderListOutput
 
   val invoker = AsyncApiInvoker("foo")
   val apiClient = ApiClient[Future, Throwable](invoker)
